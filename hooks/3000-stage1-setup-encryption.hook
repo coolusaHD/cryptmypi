@@ -60,25 +60,55 @@ copy_file config /etc/initramfs-tools/unlock.sh /etc/unlock.sh
 EOF
 chmod 755 ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
 
-# Unlock Script
+# Unlock Script to automatically load key file from USB if inserted otherwise ask for LUKS password via keyboard
 cat << EOF > "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 #!/bin/sh
 
-export PATH='/sbin:/bin/:/usr/sbin:/usr/bin'
 
-while true
-do
-    test -e /dev/mapper/crypt && break || cryptsetup luksOpen /dev/disk/by-uuid/${__LUKSUUID} crypt
-done
+DEV=${_USBUUID}
+KEYFILE=${_KEYFILENAME}
+MD=/tmp-usb-mnt
 
-/scripts/local-top/cryptroot
-for i in \$(ps aux | grep 'cryptroot' | grep -v 'grep' | awk '{print \$1}'); do kill -9 \$i; done
-for i in \$(ps aux | grep 'askpass' | grep -v 'grep' | awk '{print \$1}'); do kill -9 \$i; done
-for i in \$(ps aux | grep 'ask-for-password' | grep -v 'grep' | awk '{print \$1}'); do kill -9 \$i; done
-for i in \$(ps aux | grep '\\-sh' | grep -v 'grep' | awk '{print \$1}'); do kill -9 \$i; done
-exit 0
+TRUE=0
+FALSE=1
+
+# flag tracking key-file availability
+OPENED=\$FALSE
+NOFILE=\$FALSE
+modprobe usb-storage >/dev/null 2>&1
+#modprobe vfat >/dev/null 2>&1
+mkdir -p \$MD
+sleep 7
+
+
+if [ -b /dev/disk/by-uuid/\$DEV ]; then
+   echo "> Trying device: \$DEV ..." >&2
+   mount /dev/disk/by-uuid/\$DEV \$MD -o ro 2>/dev/null
+   if [ -f \$MD/\$KEYFILE ]; then
+       dd if=\$MD/\$KEYFILE bs=32 count=1 | cat
+       umount \$MD 2>/dev/null
+       OPENED=\$TRUE
+       NOFILE=\$TRUE
+   else
+      echo "> No Key File found on USB ..." >&2
+   fi
+   umount \$MD 2>/dev/null
+else
+   echo "> No USB found with UUID: \$DEV ..." >&2
+fi
+
+if [ \$OPENED -ne \$TRUE ] || [ \$NOFILE -ne \$TRUE ]; then
+    echo "> FAILED to get USB key file ..." >&2
+    /lib/cryptsetup/askpass "Try LUKS password: "
+else
+    echo "> Success loading key file for Root." >&2
+fi
+
+sleep 2
 EOF
 chmod +x "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 
 # Adding dm_mod to initramfs modules
 echo 'dm_crypt' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
+# Adding usb_storage to initramfs modules so that the USB drive can be accessed before unlocking
+echo 'usb_storage' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules

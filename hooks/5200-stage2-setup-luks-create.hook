@@ -35,6 +35,11 @@ is_build_encrypted && {
             echo_error "- Aborting since we failed to create LUKS UUID on ${_BLKDEV}${__PARTITIONPREFIX}2"
             exit 1
         fi
+        ## Add the generated key as encryption key for LUKS
+        if [ ! -z "${_USBKEYPATH}" ]; then
+            echo_debug "Attempting to add USB Key file to LUKS"
+            echo "${_LUKSPASSWD}" | cryptsetup -v luksAddKey ${_BLKDEV}${__PARTITIONPREFIX}2 ${_USBKEYPATH}${_KEYFILENAME}
+        fi
     else
         echo_error "- Aborting since we failed to create LUKS on ${_BLKDEV}${__PARTITIONPREFIX}2"
         exit 1

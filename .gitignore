@@ -24,3 +24,6 @@ personal/
 # Experimental hooks
 hooks/0000-experimental-driver-rtl8188eu.hook
 hooks/0000-experimental-initramfs-v2wifi.hook
+
+#temporary files
+old/
