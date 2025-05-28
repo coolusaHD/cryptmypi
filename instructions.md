@@ -21,4 +21,4 @@ export _USBUUID="9ecfba84-47d4-4495-a7db-418fdce15cad"
 `3000-stage1-setup-encryption.hook:66` 
 
 ## Add USB Key as a Trusted Key for LUKS decryption
-`5200-stage2-setup-kus-create.hook:40`
+`5200-stage2-setup-luks-create.hook:40`

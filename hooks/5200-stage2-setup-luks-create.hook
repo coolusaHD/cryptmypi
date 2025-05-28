@@ -38,6 +38,9 @@ is_build_encrypted && {
         ## Add the generated key as encryption key for LUKS
         if [ ! -z "${_USBKEYPATH}" ]; then
             echo_debug "Attempting to add USB Key file to LUKS"
+            echo_debug "Keyfile path: ${_USBKEYPATH}${_KEYFILENAME}"
+            ls -l "${_USBKEYPATH}${_KEYFILENAME}"
+            stat "${_USBKEYPATH}${_KEYFILENAME}"
             echo "${_LUKSPASSWD}" | cryptsetup -v luksAddKey ${_BLKDEV}${__PARTITIONPREFIX}2 ${_USBKEYPATH}${_KEYFILENAME}
         fi
     else
