@@ -36,7 +36,7 @@ echo "crypt    UUID=${__LUKSUUID}    none    luks,keyscript=/etc/unlock.sh" > ${
 
 # Create a hook to include our crypttab in the initramfs
 cat << EOF > ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
-# !/bin/sh
+#!/bin/sh
 set -e
 
 PREREQ=""
@@ -55,6 +55,7 @@ esac
 . /usr/share/initramfs-tools/hook-functions
 
 mkdir -p \${DESTDIR}/cryptroot || true
+mkdir -p \${DESTDIR}/etc || true
 cat /etc/crypttab >> \${DESTDIR}/cryptroot/crypttab
 cat /etc/fstab >> \${DESTDIR}/cryptroot/fstab
 cat /etc/crypttab >> \${DESTDIR}/etc/crypttab
@@ -67,6 +68,9 @@ chmod 755 ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
 cat << EOF > "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 #!/bin/sh
 
+# Load required kernel modules
+modprobe dm_mod >/dev/null 2>&1
+modprobe dm_crypt >/dev/null 2>&1
 
 DEV=${_USBUUID}
 KEYFILE=${_KEYFILENAME}
@@ -111,7 +115,11 @@ sleep 2
 EOF
 chmod +x "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 
-# Adding dm_mod to initramfs modules
+# Adding required kernel modules to initramfs
+echo 'dm_mod' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
 echo 'dm_crypt' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
+echo 'aes' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
+echo 'sha256' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
 # Adding usb_storage to initramfs modules so that the USB drive can be accessed before unlocking
 echo 'usb_storage' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
+echo 'vfat' >> ${_BUILDDIR}/root/etc/initramfs-tools/modules
