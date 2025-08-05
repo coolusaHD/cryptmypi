@@ -32,7 +32,7 @@ sed -i 's#/dev/mmcblk0p2#/dev/mapper/crypt#g' ${_BUILDDIR}/root/etc/fstab
 sed -i 's#ext3#ext4#g' ${_BUILDDIR}/root/etc/fstab
 
 # Update /etc/crypttab
-echo "crypt    UUID=${__LUKSUUID}    none    luks,keyscript=/usr/local/sbin/unlock.sh" > ${_BUILDDIR}/root/etc/crypttab
+echo "crypt    UUID=${__LUKSUUID}    none    luks,keyscript=/etc/unlock.sh" > ${_BUILDDIR}/root/etc/crypttab
 
 # Create a hook to include our crypttab in the initramfs
 cat << EOF > ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
