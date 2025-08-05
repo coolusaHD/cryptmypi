@@ -27,12 +27,19 @@ sed -i 's#rootfstype=ext3#rootfstype=ext4#g' ${_BUILDDIR}/root/boot/cmdline.txt
 # Enable cryptsetup when building initramfs
 echo "CRYPTSETUP=y" >> ${_BUILDDIR}/root/etc/cryptsetup-initramfs/conf-hook
 
+# Add debug output to cryptsetup
+echo "CRYPTSETUP_DEBUG=y" >> ${_BUILDDIR}/root/etc/cryptsetup-initramfs/conf-hook
+
 # Update /etc/fstab
 sed -i 's#/dev/mmcblk0p2#/dev/mapper/crypt#g' ${_BUILDDIR}/root/etc/fstab
 sed -i 's#ext3#ext4#g' ${_BUILDDIR}/root/etc/fstab
 
 # Update /etc/crypttab
 echo "crypt    UUID=${__LUKSUUID}    none    luks,keyscript=/etc/unlock.sh" > ${_BUILDDIR}/root/etc/crypttab
+
+# Debug: Show the created crypttab
+echo_debug "Created /etc/crypttab with content:"
+cat ${_BUILDDIR}/root/etc/crypttab
 
 # Create a hook to include our crypttab in the initramfs
 cat << EOF > ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
@@ -52,15 +59,28 @@ case "\${1}" in
         ;;
 esac
 
+echo "[DEBUG] zz-cryptsetup hook: Starting..." >&2
+
 . /usr/share/initramfs-tools/hook-functions
 
 mkdir -p \${DESTDIR}/cryptroot || true
 mkdir -p \${DESTDIR}/etc || true
+
+echo "[DEBUG] zz-cryptsetup hook: Copying crypttab and fstab..." >&2
 cat /etc/crypttab >> \${DESTDIR}/cryptroot/crypttab
 cat /etc/fstab >> \${DESTDIR}/cryptroot/fstab
 cat /etc/crypttab >> \${DESTDIR}/etc/crypttab
 cat /etc/fstab >> \${DESTDIR}/etc/fstab
+
+echo "[DEBUG] zz-cryptsetup hook: Copying unlock script..." >&2
 copy_file config /etc/initramfs-tools/unlock.sh /etc/unlock.sh
+chmod +x \${DESTDIR}/etc/unlock.sh
+
+echo "[DEBUG] zz-cryptsetup hook: Checking copied files..." >&2
+ls -la \${DESTDIR}/etc/crypttab >&2 2>/dev/null || echo "[ERROR] crypttab not copied" >&2
+ls -la \${DESTDIR}/etc/unlock.sh >&2 2>/dev/null || echo "[ERROR] unlock.sh not copied" >&2
+
+echo "[DEBUG] zz-cryptsetup hook: Complete" >&2
 EOF
 chmod 755 ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
 
@@ -68,13 +88,41 @@ chmod 755 ${_BUILDDIR}/root/etc/initramfs-tools/hooks/zz-cryptsetup
 cat << EOF > "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 #!/bin/sh
 
-# Load required kernel modules
+echo "> [DEBUG] Starting unlock script..." >&2
+echo "> [DEBUG] Loading kernel modules..." >&2
+
+# Load required kernel modules with debug output
 modprobe dm_mod >/dev/null 2>&1
+if [ \$? -eq 0 ]; then
+    echo "> [DEBUG] dm_mod loaded successfully" >&2
+else
+    echo "> [ERROR] Failed to load dm_mod" >&2
+fi
+
 modprobe dm_crypt >/dev/null 2>&1
+if [ \$? -eq 0 ]; then
+    echo "> [DEBUG] dm_crypt loaded successfully" >&2
+else
+    echo "> [ERROR] Failed to load dm_crypt" >&2
+fi
+
+# Check if device-mapper is working
+if [ -c /dev/mapper/control ]; then
+    echo "> [DEBUG] Device-mapper control device exists" >&2
+else
+    echo "> [ERROR] Device-mapper control device missing" >&2
+fi
+
+# List loaded modules
+echo "> [DEBUG] Loaded dm modules:" >&2
+lsmod | grep dm >&2
 
 DEV=${_USBUUID}
 KEYFILE=${_KEYFILENAME}
 MD=/tmp-usb-mnt
+
+echo "> [DEBUG] USB UUID: \$DEV" >&2
+echo "> [DEBUG] Key filename: \$KEYFILE" >&2
 
 TRUE=0
 FALSE=1
@@ -92,10 +140,12 @@ if [ -b /dev/disk/by-uuid/\$DEV ]; then
    echo "> Trying device: \$DEV ..." >&2
    mount /dev/disk/by-uuid/\$DEV \$MD -o ro 2>/dev/null
    if [ -f \$MD/\$KEYFILE ]; then
+       echo "> [DEBUG] Key file found, reading..." >&2
        dd if=\$MD/\$KEYFILE bs=32 count=1 | cat
        umount \$MD 2>/dev/null
        OPENED=\$TRUE
        NOFILE=\$TRUE
+       echo "> [DEBUG] Key file successfully read" >&2
    else
       echo "> No Key File found on USB ..." >&2
    fi
@@ -106,10 +156,20 @@ fi
 
 if [ \$OPENED -ne \$TRUE ] || [ \$NOFILE -ne \$TRUE ]; then
     echo "> FAILED to get USB key file ..." >&2
+    echo "> [DEBUG] Falling back to password prompt" >&2
     /lib/cryptsetup/askpass "Try LUKS password: "
 else
     echo "> Success loading key file for Root." >&2
+    echo "> [DEBUG] Key file loaded, script ending normally" >&2
 fi
+
+# Additional debug information before exiting
+echo "> [DEBUG] Available block devices:" >&2
+ls -la /dev/mmcblk* >&2 2>/dev/null || echo "> [DEBUG] No mmcblk devices found" >&2
+echo "> [DEBUG] Device mapper status:" >&2
+dmsetup version >&2 2>/dev/null || echo "> [ERROR] dmsetup not available" >&2
+echo "> [DEBUG] Cryptsetup version:" >&2
+cryptsetup --version >&2 2>/dev/null || echo "> [ERROR] cryptsetup not available" >&2
 
 sleep 2
 EOF
