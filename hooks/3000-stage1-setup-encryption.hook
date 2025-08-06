@@ -76,9 +76,14 @@ echo "[DEBUG] zz-cryptsetup hook: Copying unlock script..." >&2
 copy_file config /etc/initramfs-tools/unlock.sh /etc/unlock.sh
 chmod +x \${DESTDIR}/etc/unlock.sh
 
+# Ensure dmsetup is available in initramfs
+copy_exec /sbin/dmsetup /sbin/dmsetup || echo "[ERROR] dmsetup not found" >&2
+copy_exec /sbin/cryptsetup /sbin/cryptsetup || echo "[ERROR] cryptsetup not found" >&2
+
 echo "[DEBUG] zz-cryptsetup hook: Checking copied files..." >&2
 ls -la \${DESTDIR}/etc/crypttab >&2 2>/dev/null || echo "[ERROR] crypttab not copied" >&2
 ls -la \${DESTDIR}/etc/unlock.sh >&2 2>/dev/null || echo "[ERROR] unlock.sh not copied" >&2
+ls -la \${DESTDIR}/sbin/dmsetup >&2 2>/dev/null || echo "[ERROR] dmsetup not copied" >&2
 
 echo "[DEBUG] zz-cryptsetup hook: Complete" >&2
 EOF
@@ -91,16 +96,23 @@ cat << EOF > "${CHROOTDIR}/etc/initramfs-tools/unlock.sh"
 echo "> [DEBUG] Starting unlock script..." >&2
 echo "> [DEBUG] Loading kernel modules..." >&2
 
+# Check kernel version and available modules
+echo "> [DEBUG] Kernel version: \$(uname -r)" >&2
+echo "> [DEBUG] Available dm modules:" >&2
+find /lib/modules/\$(uname -r) -name "dm*.ko*" 2>/dev/null | head -5 >&2 || echo "> [DEBUG] No dm modules found in /lib/modules" >&2
+
 # Load required kernel modules with debug output
-modprobe dm_mod >/dev/null 2>&1
-if [ \$? -eq 0 ]; then
+if lsmod | grep -q "^dm_mod "; then
+    echo "> [DEBUG] dm_mod already loaded" >&2
+elif modprobe dm_mod >/dev/null 2>&1; then
     echo "> [DEBUG] dm_mod loaded successfully" >&2
 else
     echo "> [ERROR] Failed to load dm_mod" >&2
 fi
 
-modprobe dm_crypt >/dev/null 2>&1
-if [ \$? -eq 0 ]; then
+if lsmod | grep -q "^dm_crypt "; then
+    echo "> [DEBUG] dm_crypt already loaded" >&2
+elif modprobe dm_crypt >/dev/null 2>&1; then
     echo "> [DEBUG] dm_crypt loaded successfully" >&2
 else
     echo "> [ERROR] Failed to load dm_crypt" >&2
@@ -111,11 +123,56 @@ if [ -c /dev/mapper/control ]; then
     echo "> [DEBUG] Device-mapper control device exists" >&2
 else
     echo "> [ERROR] Device-mapper control device missing" >&2
+    # Try to create the device node if it doesn't exist
+    mknod /dev/mapper/control c 10 236 2>/dev/null || true
+    if [ -c /dev/mapper/control ]; then
+        echo "> [DEBUG] Device-mapper control device created successfully" >&2
+    else
+        echo "> [ERROR] Failed to create device-mapper control device" >&2
+    fi
 fi
 
 # List loaded modules
 echo "> [DEBUG] Loaded dm modules:" >&2
-lsmod | grep dm >&2
+lsmod | grep "^dm" >&2 || echo "> [DEBUG] No dm modules currently loaded" >&2
+
+# Initialize device-mapper
+echo "> [DEBUG] Initializing device-mapper..." >&2
+if [ ! -d /dev/mapper ]; then
+    mkdir -p /dev/mapper
+    echo "> [DEBUG] Created /dev/mapper directory" >&2
+fi
+
+# Ensure device-mapper control device exists and has correct permissions
+if [ ! -c /dev/mapper/control ]; then
+    mknod /dev/mapper/control c 10 236 2>/dev/null || true
+fi
+chmod 600 /dev/mapper/control 2>/dev/null || true
+
+# Test device-mapper functionality
+if dmsetup version >/dev/null 2>&1; then
+    echo "> [DEBUG] Device-mapper initialized successfully" >&2
+    dmsetup version >&2
+else
+    echo "> [ERROR] Device-mapper initialization failed" >&2
+    # Try alternative initialization methods
+    echo "> [DEBUG] Attempting alternative device-mapper setup..." >&2
+    
+    # Load additional required modules
+    modprobe dm_mod 2>/dev/null || true
+    modprobe dm_crypt 2>/dev/null || true
+    
+    # Create device nodes if they don't exist
+    [ ! -e /dev/device-mapper ] && mknod /dev/device-mapper c 10 236 2>/dev/null || true
+    [ ! -L /dev/mapper/control ] && [ ! -e /dev/mapper/control ] && ln -s /dev/device-mapper /dev/mapper/control 2>/dev/null || true
+    
+    # Test again
+    if dmsetup version >/dev/null 2>&1; then
+        echo "> [DEBUG] Device-mapper initialized successfully (second attempt)" >&2
+    else
+        echo "> [ERROR] Device-mapper still not working" >&2
+    fi
+fi
 
 DEV=${_USBUUID}
 KEYFILE=${_KEYFILENAME}
@@ -166,10 +223,19 @@ fi
 # Additional debug information before exiting
 echo "> [DEBUG] Available block devices:" >&2
 ls -la /dev/mmcblk* >&2 2>/dev/null || echo "> [DEBUG] No mmcblk devices found" >&2
+ls -la /dev/nvme* >&2 2>/dev/null || true
 echo "> [DEBUG] Device mapper status:" >&2
-dmsetup version >&2 2>/dev/null || echo "> [ERROR] dmsetup not available" >&2
+if dmsetup version >&2 2>/dev/null; then
+    echo "> [DEBUG] dmsetup is working properly" >&2
+else
+    echo "> [ERROR] dmsetup not available" >&2
+fi
 echo "> [DEBUG] Cryptsetup version:" >&2
-cryptsetup --version >&2 2>/dev/null || echo "> [ERROR] cryptsetup not available" >&2
+if cryptsetup --version >&2 2>/dev/null; then
+    echo "> [DEBUG] cryptsetup is working properly" >&2
+else
+    echo "> [ERROR] cryptsetup not available" >&2
+fi
 
 sleep 2
 EOF
